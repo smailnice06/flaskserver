@@ -1,14 +1,15 @@
 from flask import Flask, jsonify, request
-import os
 
 connectedusers = {}
 
 app = Flask(__name__)
 
+# Route pour la page d'accueil
 @app.route('/')
 def home():
     return "Bienvenue sur la page d'accueil!"
 
+# Route dynamique pour saluer un utilisateur
 @app.route('/hello/<name>')
 def hello_name(name):
     return f"Bonjour, {name}!"
@@ -16,13 +17,22 @@ def hello_name(name):
 @app.route('/submit', methods=['POST'])
 def submit():
     try:
+        # Récupérer les données JSON de la requête
         data = request.json
+
+        # Extraire les valeurs
         UID = data.get('value1')
         IPADRESS = data.get('value2')
+
+        # Vérifier que les valeurs sont des entiers
         if not isinstance(UID, int) or not isinstance(IPADRESS, str):
             return jsonify({"error": "Les deux valeurs doivent être des entiers"}), 400
+
+        
         connectedusers[UID] = IPADRESS
+
         return f"{connectedusers[UID]}"
+
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -34,8 +44,14 @@ def register():
 def isconnected():
     try:
         data = request.json
+
         UID = data.get('value1')
-        return f"{UID in connectedusers}"
+
+        if UID in connectedusers:
+            return f"True"
+        else:
+            return f"False"
+    
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -43,11 +59,17 @@ def isconnected():
 def getin():
     try:
         data = request.json
+
         UID = data.get('value1')
-        return f"{connectedusers.get(UID, 'False')}"
+
+        if UID in connectedusers:
+            return f"{connectedusers[UID]}"
+        else:
+            return f"False"      
+    
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+    
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5001, debug=True)
