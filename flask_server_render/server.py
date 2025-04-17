@@ -1,6 +1,45 @@
 from flask import Flask, jsonify, request
+import os
+import sqlite3
 
-connectedusers = {}
+conn = sqlite3.connect("connectedusers.db")
+cursor = conn.cursor()
+
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS connectedusers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid INTEGER NOT NULL,
+    ipadress TEXT NOT NULL
+)
+""")
+conn.commit()
+
+
+def add_users(uid, ipadress):
+    cursor.execute("SELECT uid,ipadress FROM connectedusers WHERE uid = ?", (uid,))
+    contacts = cursor.fetchall()
+    
+    if contacts and contacts[0] == (uid, ipadress):
+        return "DOES EXIST"
+    else: 
+        cursor.execute("INSERT INTO connectedusers (uid, ipadress) VALUES (?, ?)", (uid, ipadress))
+        conn.commit()
+
+
+def getconnecters(uid1):
+    cursor.execute("SELECT ipadress FROM connectedusers WHERE uid = ?", (uid1,))
+    contacts = cursor.fetchall()
+    return contacts[0][0]
+
+def updateconnectedusers(uid1,ipadress1):
+    cursor.execute("UPDATE connectedusers SET ipadress = ? WHERE uid = ?", (ipadress1,uid1))
+    conn.commit()
+
+def listeofconnectedusers():
+    cursor.execute("SELECT uid FROM connectedusers")
+    contacts = cursor.fetchall()
+    return contacts
 
 app = Flask(__name__)
 
@@ -8,11 +47,6 @@ app = Flask(__name__)
 @app.route('/')
 def home():
     return "Bienvenue sur la page d'accueil!"
-
-# Route dynamique pour saluer un utilisateur
-@app.route('/hello/<name>')
-def hello_name(name):
-    return f"Bonjour, {name}!"
 
 @app.route('/submit', methods=['POST'])
 def submit():
@@ -29,16 +63,16 @@ def submit():
             return jsonify({"error": "Les deux valeurs doivent être des entiers"}), 400
 
         
-        connectedusers[UID] = IPADRESS
+        add_users(UID, IPADRESS)
 
-        return f"{connectedusers[UID]}"
+        return f"{getconnecters(UID)}"
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
 @app.route('/register')
 def register():
-    return f"{connectedusers}"
+    return f"{listeofconnectedusers()}"
 
 @app.route('/isconnected', methods=['POST'])
 def isconnected():
@@ -47,10 +81,18 @@ def isconnected():
 
         UID = data.get('value1')
 
-        if UID in connectedusers:
-            return f"True"
-        else:
-            return f"False"
+        listofusers = listeofconnectedusers()
+
+        tlistofusers = len(listofusers)
+
+        for i in tlistofusers:
+            if UID == listofusers[i][0]:
+                return f"True"
+        
+        return f"False"
+
+
+        
     
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -62,14 +104,46 @@ def getin():
 
         UID = data.get('value1')
 
-        if UID in connectedusers:
-            return f"{connectedusers[UID]}"
+        listofusers = listeofconnectedusers()
+
+        tlistofusers = len(listofusers)
+
+        for i in tlistofusers:
+            if UID == listofusers[i][0]:
+                return f"{getconnecters(UID)}"
         else:
             return f"False"      
     
     except Exception as e:
         return jsonify({"error": str(e)}), 400
     
+@app.route('/delete', methods=['POST'])
+def delete():
+    try:
+        data = request.json
+        UID = data.get('value1')
+        IPADRESS = data.get('value2')
+
+        if IPADRESS in connectedusers:
+            del connectedusers[UID]
+            return "TRUE"
+        else:
+            return "False"
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400    
+
+@app.route('/update', methods=['POST'])
+def update():
+    try:
+        data = request.json
+        UID = data.get('value1')
+        IPADRESS = data.get('value2')
+
+        updateconnectedusers(UID,IPADRESS)
+        return "OK"
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5001, debug=True)
+     port = int(os.environ.get("PORT", 5000))
+     app.run(host="0.0.0.0", port=port)
