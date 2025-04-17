@@ -20,6 +20,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         uid INTEGER NOT NULL,
         ipadress TEXT NOT NULL,
+        port INTEGER NOT NULL,
         last_seen INTEGER NOT NULL
     )
     """)
@@ -29,7 +30,7 @@ def init_db():
 init_db()
 
 # Fonctions principales
-def add_users(uid, ipadress):
+def add_users(uid, ipadress, port):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT uid, ipadress FROM connectedusers WHERE uid = ?", (uid,))
@@ -40,22 +41,24 @@ def add_users(uid, ipadress):
         return "DOES EXIST"
     else:
         last_seen = int(time.time())
-        cursor.execute("INSERT INTO connectedusers (uid, ipadress, last_seen) VALUES (?, ?, ?)", (uid, ipadress, last_seen))
+        cursor.execute("INSERT INTO connectedusers (uid, ipadress, port, last_seen) VALUES (?, ?, ?, ?)", 
+                       (uid, ipadress, port, last_seen))
         conn.commit()
         conn.close()
 
 def getconnecters(uid1):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT ipadress FROM connectedusers WHERE uid = ?", (uid1,))
-    contacts = cursor.fetchall()
+    cursor.execute("SELECT ipadress, port FROM connectedusers WHERE uid = ?", (uid1,))
+    contact = cursor.fetchone()
     conn.close()
-    return contacts[0][0] if contacts else None
+    return f"{contact[0]}:{contact[1]}" if contact else None
 
-def updateconnectedusers(uid1, ipadress1):
+def updateconnectedusers(uid1, ipadress1, port1):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE connectedusers SET ipadress = ?, last_seen = ? WHERE uid = ?", (ipadress1, int(time.time()), uid1))
+    cursor.execute("UPDATE connectedusers SET ipadress = ?, port = ?, last_seen = ? WHERE uid = ?", 
+                   (ipadress1, port1, int(time.time()), uid1))
     conn.commit()
     conn.close()
 
@@ -86,11 +89,12 @@ def submit():
         data = request.json
         UID = data.get('value1')
         IPADRESS = data.get('value2')
+        PORT = data.get('value3')
 
-        if not isinstance(UID, int) or not isinstance(IPADRESS, str):
-            return jsonify({"error": "Les deux valeurs doivent être valides"}), 400
+        if not isinstance(UID, int) or not isinstance(IPADRESS, str) or not isinstance(PORT, int):
+            return jsonify({"error": "Les trois valeurs doivent être valides"}), 400
 
-        add_users(UID, IPADRESS)
+        add_users(UID, IPADRESS, PORT)
         return f"{getconnecters(UID)}"
 
     except Exception as e:
@@ -159,8 +163,9 @@ def update():
         data = request.json
         UID = data.get('value1')
         IPADRESS = data.get('value2')
+        PORT = data.get('value3')
 
-        updateconnectedusers(UID, IPADRESS)
+        updateconnectedusers(UID, IPADRESS, PORT)
         return "OK"
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -180,3 +185,4 @@ if __name__ == '__main__':
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
