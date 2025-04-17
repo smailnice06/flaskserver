@@ -23,9 +23,15 @@ def add_users(uid, ipadress):
     
     if contacts and contacts[0] == (uid, ipadress):
         return "DOES EXIST"
+    elif contacts:
+        # Si l'utilisateur existe mais l'IP est différente, on met à jour l'IP
+        updateconnectedusers(uid, ipadress)
+        return "IP UPDATED"
     else:
         cursor.execute("INSERT INTO connectedusers (uid, ipadress) VALUES (?, ?)", (uid, ipadress))
         conn.commit()
+        return "NEW USER"
+
 
 # Fonction pour obtenir l'IP d'un utilisateur connecté
 def getconnecters(uid1):
