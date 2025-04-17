@@ -98,7 +98,10 @@ def submit():
 
 @app.route('/register')
 def register():
-    return f"{listeofconnectedusers()}"
+    users = listeofconnectedusers()
+    # Convertir en format JSON : liste de dictionnaires
+    return jsonify([{"uid": uid[0]} for uid in users])
+
 
 @app.route('/isconnected', methods=['POST'])
 def isconnected():
