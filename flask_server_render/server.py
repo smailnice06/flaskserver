@@ -1,94 +1,108 @@
 from flask import Flask, jsonify, request
 import os
 import sqlite3
+import time
+from threading import Thread
 
-# Connexion à la base de données SQLite
-conn = sqlite3.connect("connectedusers.db", check_same_thread=False)  # check_same_thread=False pour éviter les erreurs dans Flask
-cursor = conn.cursor()
-
-# Création de la table si elle n'existe pas
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS connectedusers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    uid INTEGER NOT NULL,
-    ipadress TEXT NOT NULL
-)
-""")
-conn.commit()
-
-# Fonction pour ajouter un utilisateur
-def add_users(uid, ipadress):
-    cursor.execute("SELECT uid, ipadress FROM connectedusers WHERE uid = ?", (uid,))
-    contacts = cursor.fetchall()
-    
-    if contacts and contacts[0] == (uid, ipadress):
-        return "DOES EXIST"
-    elif contacts:
-        # Si l'utilisateur existe mais l'IP est différente, on met à jour l'IP
-        updateconnectedusers(uid, ipadress)
-        return "IP UPDATED"
-    else:
-        cursor.execute("INSERT INTO connectedusers (uid, ipadress) VALUES (?, ?)", (uid, ipadress))
-        conn.commit()
-        return "NEW USER"
-
-
-# Fonction pour obtenir l'IP d'un utilisateur connecté
-def getconnecters(uid1):
-    cursor.execute("SELECT ipadress FROM connectedusers WHERE uid = ?", (uid1,))
-    contacts = cursor.fetchall()
-    if contacts:
-        return contacts[0][0]
-    return None
-
-# Fonction pour mettre à jour l'adresse IP d'un utilisateur
-def updateconnectedusers(uid1, ipadress1):
-    cursor.execute("UPDATE connectedusers SET ipadress = ? WHERE uid = ?", (ipadress1, uid1))
-    conn.commit()
-
-# Fonction pour lister les utilisateurs connectés
-def listeofconnectedusers():
-    cursor.execute("SELECT uid FROM connectedusers")
-    contacts = cursor.fetchall()
-    return contacts
-
-# Création de l'application Flask
 app = Flask(__name__)
 
-# Route d'accueil
+# Fonction pour se connecter à la base de données
+def get_db_connection():
+    conn = sqlite3.connect("connectedusers.db", check_same_thread=False)
+    return conn
+
+# Initialisation de la base de données
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS connectedusers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid INTEGER NOT NULL,
+        ipadress TEXT NOT NULL,
+        last_seen INTEGER NOT NULL
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Fonctions principales
+def add_users(uid, ipadress):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT uid, ipadress FROM connectedusers WHERE uid = ?", (uid,))
+    contacts = cursor.fetchall()
+
+    if contacts and contacts[0] == (uid, ipadress):
+        conn.close()
+        return "DOES EXIST"
+    else:
+        last_seen = int(time.time())
+        cursor.execute("INSERT INTO connectedusers (uid, ipadress, last_seen) VALUES (?, ?, ?)", (uid, ipadress, last_seen))
+        conn.commit()
+        conn.close()
+
+def getconnecters(uid1):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ipadress FROM connectedusers WHERE uid = ?", (uid1,))
+    contacts = cursor.fetchall()
+    conn.close()
+    return contacts[0][0] if contacts else None
+
+def updateconnectedusers(uid1, ipadress1):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE connectedusers SET ipadress = ?, last_seen = ? WHERE uid = ?", (ipadress1, int(time.time()), uid1))
+    conn.commit()
+    conn.close()
+
+def listeofconnectedusers():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT uid FROM connectedusers")
+    contacts = cursor.fetchall()
+    conn.close()
+    return contacts
+
+def clean_inactive_users(timeout=60):
+    now = int(time.time())
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM connectedusers WHERE ? - last_seen > ?", (now, timeout))
+    conn.commit()
+    conn.close()
+
+# Routes Flask
 @app.route('/')
 def home():
     return "Bienvenue sur la page d'accueil!"
 
-# Route pour soumettre les données (UID et IP)
 @app.route('/submit', methods=['POST'])
 def submit():
     try:
-        # Récupérer les données JSON de la requête
         data = request.json
-
-        # Extraire les valeurs
         UID = data.get('value1')
         IPADRESS = data.get('value2')
 
-        # Vérifier que les valeurs sont valides
         if not isinstance(UID, int) or not isinstance(IPADRESS, str):
-            return jsonify({"error": "Les valeurs doivent être valides (UID doit être un entier et IP doit être une chaîne)"}), 400
+            return jsonify({"error": "Les deux valeurs doivent être valides"}), 400
 
-        # Ajouter l'utilisateur
-        result = add_users(UID, IPADRESS)
-
-        return jsonify({"message": "Utilisateur ajouté ou déjà existant", "result": result})
+        add_users(UID, IPADRESS)
+        return f"{getconnecters(UID)}"
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# Route pour obtenir la liste des utilisateurs connectés
 @app.route('/register')
 def register():
-    return jsonify(listeofconnectedusers())
+    users = listeofconnectedusers()
+    # Convertir en format JSON : liste de dictionnaires
+    return jsonify([{"uid": uid[0]} for uid in users])
 
-# Route pour vérifier si un utilisateur est connecté
+
 @app.route('/isconnected', methods=['POST'])
 def isconnected():
     try:
@@ -99,14 +113,13 @@ def isconnected():
 
         for user in listofusers:
             if UID == user[0]:
-                return jsonify({"connected": True})
+                return "True"
 
-        return jsonify({"connected": False})
+        return "False"
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# Route pour obtenir l'IP d'un utilisateur si connecté
 @app.route('/getin', methods=['POST'])
 def getin():
     try:
@@ -117,31 +130,29 @@ def getin():
 
         for user in listofusers:
             if UID == user[0]:
-                ip = getconnecters(UID)
-                return jsonify({"ip": ip if ip else "Non disponible"})
+                return f"{getconnecters(UID)}"
 
-        return jsonify({"message": "Utilisateur non trouvé"}), 404
+        return "False"
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# Route pour supprimer un utilisateur
 @app.route('/delete', methods=['POST'])
 def delete():
     try:
         data = request.json
         UID = data.get('value1')
 
-        # Supprimer l'utilisateur de la base de données
+        conn = get_db_connection()
+        cursor = conn.cursor()
         cursor.execute("DELETE FROM connectedusers WHERE uid = ?", (UID,))
         conn.commit()
-        
-        return jsonify({"message": "Utilisateur supprimé"})
+        conn.close()
 
+        return "TRUE"
     except Exception as e:
-        return jsonify({"error": str(e)}), 400    
+        return jsonify({"error": str(e)}), 400
 
-# Route pour mettre à jour l'IP d'un utilisateur
 @app.route('/update', methods=['POST'])
 def update():
     try:
@@ -150,14 +161,22 @@ def update():
         IPADRESS = data.get('value2')
 
         updateconnectedusers(UID, IPADRESS)
-        return jsonify({"message": "IP mise à jour avec succès"})
-        
+        return "OK"
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# Lancement de l'application
+# Fonction pour lancer le nettoyage dans un thread séparé
+def clean_inactive_users_periodically():
+    while True:
+        clean_inactive_users()
+        time.sleep(60)  # Nettoyage toutes les minutes
+
+# Lancer le thread pour nettoyage des utilisateurs inactifs
 if __name__ == '__main__':
-     port = int(os.environ.get("PORT", 5000))
-     app.run(host="0.0.0.0", port=port)
+    # Lancer un thread qui s'exécute en parallèle et nettoie toutes les minutes
+    thread = Thread(target=clean_inactive_users_periodically)
+    thread.daemon = True  # Terminer le thread lorsque le programme principal se termine
+    thread.start()
 
-
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
