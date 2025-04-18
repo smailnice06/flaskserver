@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request
 import os
 import sqlite3
 import time
-from threading import Thread, Lock
+from threading import Lock
 
 app = Flask(__name__)
 
@@ -177,9 +177,8 @@ def login():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
-    ipadress = request.remote_addr  # On récupère l'IP directement depuis la requête
+    ipadress = request.headers.get('X-Forwarded-For', request.remote_addr)  # Récupérer l'IP depuis les en-têtes si disponible
     return connect(username, password, ipadress)
-
 
 @app.route('/friend-request', methods=['POST'])
 def friend_request():
@@ -235,7 +234,7 @@ def get_friend_ip():
 
 # Lancement de l'application
 if __name__ == '__main__':
-
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
     
