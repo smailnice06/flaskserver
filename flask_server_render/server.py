@@ -56,17 +56,22 @@ def add_users(username, password, ipadress):
         return "OK"
 
 # Connexion utilisateur
-def connect(username, password):
+def connect(username, password, ipadress):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, password FROM users WHERE username = ?", (username,))
+    
+    cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
     user = cursor.fetchone()
-
+    if not user:
+        conn.close()
+        return jsonify({"error": "Authentification échouée"}), 401
+    
+    last_seen = int(time.time())
+    cursor.execute("UPDATE users SET ipadress = ?, last_seen = ? WHERE username = ?", (ipadress, last_seen, username))
+    conn.commit()
     conn.close()
-    if user and user[1] == password:
-        return "OK"
-    else:
-        return "NO"
+    
+    return jsonify({"status": "IP mise à jour"}), 200
 
 # Envoyer une demande d'ami (et l'accepter automatiquement si croisée)
 def send_friend_request(username, password, usernamefriend):
@@ -167,8 +172,9 @@ def login():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
-    result = connect(username, password)
-    return jsonify({"status": result})
+    ipadress = data.get("ipadress")  # Récupération de l'adresse IP du client automatiquement
+
+    return connect(username, password, ipadress)
 
 @app.route('/friend-request', methods=['POST'])
 def friend_request():
@@ -188,14 +194,6 @@ def friends():
     return jsonify(result)
 
 
-@app.route('/update-ip', methods=['POST'])
-def update_ip():
-    data = request.get_json()
-    username = data.get("username")
-    password = data.get("password")
-    ipadress = data.get("ipadress") 
-    result = send_ipadress(username, password, ipadress)
-    return jsonify(result)
 
 @app.route('/get-friend-ip', methods=['POST'])
 def get_friend_ip():
@@ -235,7 +233,6 @@ def get_friend_ip():
         return jsonify({"ipadress": friend[0]})
     else:
         return jsonify({"error": "Utilisateur introuvable"}), 404
-
 
 
 # Lancement de l'application
