@@ -177,8 +177,9 @@ def login():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
-    ipadress = data.get("ipadress")
+    ipadress = request.remote_addr  # On récupère l'IP directement depuis la requête
     return connect(username, password, ipadress)
+
 
 @app.route('/friend-request', methods=['POST'])
 def friend_request():
