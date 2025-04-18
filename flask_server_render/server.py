@@ -6,21 +6,30 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# Fonction pour se connecter à la base de données
+# Connexion à la base de données
 def get_db_connection():
     conn = sqlite3.connect("connectedusers.db", check_same_thread=False)
     return conn
 
-# Initialisation de la base de données
+# Initialisation de la base
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS connectedusers (
+    CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uid INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        password TEXT NOT NULL,
         ipadress TEXT NOT NULL,
         last_seen INTEGER NOT NULL
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS friends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username1 TEXT NOT NULL,
+        username2 TEXT NOT NULL,
+        statut INTEGER NOT NULL
     )
     """)
     conn.commit()
@@ -28,155 +37,207 @@ def init_db():
 
 init_db()
 
-# Fonctions principales
-def add_users(uid, ipadress):
+# Ajouter un utilisateur
+def add_users(username, password, ipadress):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT uid, ipadress FROM connectedusers WHERE uid = ?", (uid,))
-    contacts = cursor.fetchall()
+    cursor.execute("SELECT username FROM users WHERE username = ?", (username,))
+    existing = cursor.fetchone()
 
-    if contacts and contacts[0] == (uid, ipadress):
+    if existing:
         conn.close()
         return "DOES EXIST"
     else:
         last_seen = int(time.time())
-        cursor.execute("INSERT INTO connectedusers (uid, ipadress, last_seen) VALUES (?, ?, ?)", (uid, ipadress, last_seen))
+        cursor.execute("INSERT INTO users (username, password, ipadress, last_seen) VALUES (?, ?, ?, ?)",
+                       (username, password, ipadress, last_seen))
         conn.commit()
         conn.close()
-
-def getconnecters(uid1):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT ipadress FROM connectedusers WHERE uid = ?", (uid1,))
-    contacts = cursor.fetchall()
-    conn.close()
-    return contacts[0][0] if contacts else None
-
-def updateconnectedusers(uid1, ipadress1):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE connectedusers SET ipadress = ?, last_seen = ? WHERE uid = ?", (ipadress1, int(time.time()), uid1))
-    conn.commit()
-    conn.close()
-
-def listeofconnectedusers():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT uid FROM connectedusers")
-    contacts = cursor.fetchall()
-    conn.close()
-    return contacts
-
-def clean_inactive_users(timeout=60):
-    now = int(time.time())
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM connectedusers WHERE ? - last_seen > ?", (now, timeout))
-    conn.commit()
-    conn.close()
-
-# Routes Flask
-@app.route('/')
-def home():
-    return "Bienvenue sur la page d'accueil!"
-
-@app.route('/submit', methods=['POST'])
-def submit():
-    try:
-        data = request.json
-        UID = data.get('value1')
-        IPADRESS = data.get('value2')
-
-        if not isinstance(UID, int) or not isinstance(IPADRESS, str):
-            return jsonify({"error": "Les deux valeurs doivent être valides"}), 400
-
-        add_users(UID, IPADRESS)
-        return f"{getconnecters(UID)}"
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route('/register')
-def register():
-    users = listeofconnectedusers()
-    # Convertir en format JSON : liste de dictionnaires
-    return jsonify([{"uid": uid[0]} for uid in users])
-
-
-@app.route('/isconnected', methods=['POST'])
-def isconnected():
-    try:
-        data = request.json
-        UID = data.get('value1')
-
-        listofusers = listeofconnectedusers()
-
-        for user in listofusers:
-            if UID == user[0]:
-                return "True"
-
-        return "False"
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route('/getin', methods=['POST'])
-def getin():
-    try:
-        data = request.json
-        UID = data.get('value1')
-
-        listofusers = listeofconnectedusers()
-
-        for user in listofusers:
-            if UID == user[0]:
-                return f"{getconnecters(UID)}"
-
-        return "False"
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route('/delete', methods=['POST'])
-def delete():
-    try:
-        data = request.json
-        UID = data.get('value1')
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM connectedusers WHERE uid = ?", (UID,))
-        conn.commit()
-        conn.close()
-
-        return "TRUE"
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route('/update', methods=['POST'])
-def update():
-    try:
-        data = request.json
-        UID = data.get('value1')
-        IPADRESS = data.get('value2')
-
-        updateconnectedusers(UID, IPADRESS)
         return "OK"
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
 
-# Fonction pour lancer le nettoyage dans un thread séparé
-def clean_inactive_users_periodically():
-    while True:
-        clean_inactive_users()
-        time.sleep(60)  # Nettoyage toutes les minutes
+# Connexion utilisateur
+def connect(username, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, password FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
 
-# Lancer le thread pour nettoyage des utilisateurs inactifs
+    conn.close()
+    if user and user[1] == password:
+        return "OK"
+    else:
+        return "NO"
+
+# Envoyer une demande d'ami (et l'accepter automatiquement si croisée)
+def send_friend_request(username, password, usernamefriend):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, password FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
+
+    if not user or user[1] != password:
+        conn.close()
+        return "Identifiant ou mot de passe incorrect"
+
+    # Vérifie si la relation existe déjà dans les deux sens
+    cursor.execute("SELECT * FROM friends WHERE username1 = ? AND username2 = ?", (username, usernamefriend))
+    relation1 = cursor.fetchone()
+
+    cursor.execute("SELECT * FROM friends WHERE username1 = ? AND username2 = ?", (usernamefriend, username))
+    relation2 = cursor.fetchone()
+
+    # Si l'autre a déjà envoyé une demande → accepter automatiquement
+    if relation2 and relation2[3] == 0:
+        cursor.execute("UPDATE friends SET statut = 1 WHERE username1 = ? AND username2 = ?",
+                       (usernamefriend, username))
+        conn.commit()
+        conn.close()
+        return "Demande acceptée automatiquement"
+
+    elif relation1:
+        conn.close()
+        return "Demande déjà envoyée"
+
+    else:
+        cursor.execute("INSERT INTO friends (username1, username2, statut) VALUES (?, ?, ?)",
+                       (username, usernamefriend, 0))
+        conn.commit()
+        conn.close()
+        return "Demande envoyée"
+
+# Lister les amis
+def list_friends(username, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT username, password FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
+
+    if not user or user[1] != password:
+        conn.close()
+        return {"error": "Identifiant ou mot de passe incorrect"}
+
+    cursor.execute("""
+        SELECT username2 FROM friends 
+        WHERE username1 = ? AND statut = 1
+        UNION
+        SELECT username1 FROM friends 
+        WHERE username2 = ? AND statut = 1
+    """, (username, username))
+
+    friends = [row[0] for row in cursor.fetchall()]
+    conn.close()
+
+    return {"friends": friends}
+
+# Envoyer son Ip à chaque connexion
+def send_ipadress(username, password, ipadress):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT username, password FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
+
+    if not user or user[1] != password:
+        conn.close()
+        return {"error": "Identifiant ou mot de passe incorrect"}
+
+    last_seen = int(time.time())
+    cursor.execute("UPDATE users SET ipadress = ?, last_seen = ? WHERE username = ?",
+                   (ipadress, last_seen, username))
+    conn.commit()
+    conn.close()
+    return {"status": "IP mise à jour"}
+
+
+
+# === ROUTES FLASK ===
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    ipadress = data.get("ipadress")
+    result = add_users(username, password, ipadress)
+    return jsonify({"status": result})
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    result = connect(username, password)
+    return jsonify({"status": result})
+
+@app.route('/friend-request', methods=['POST'])
+def friend_request():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    usernamefriend = data.get("usernamefriend")
+    result = send_friend_request(username, password, usernamefriend)
+    return jsonify({"status": result})
+
+@app.route('/friends', methods=['POST'])
+def friends():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    result = list_friends(username, password)
+    return jsonify(result)
+
+
+@app.route('/update-ip', methods=['POST'])
+def update_ip():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    ipadress = data.get("ipadress") 
+    result = send_ipadress(username, password, ipadress)
+    return jsonify(result)
+
+@app.route('/get-friend-ip', methods=['POST'])
+def get_friend_ip():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    friend_username = data.get('friend_username')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Authentifier l'utilisateur
+    cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+    user = cursor.fetchone()
+    if not user:
+        conn.close()
+        return jsonify({"error": "Authentification échouée"}), 401
+
+    # Vérifier s'ils sont amis
+    cursor.execute(
+        """
+        SELECT * FROM friends 
+        WHERE (username1 = ? AND username2 = ?) OR (username1 = ? AND username2 = ?)
+        """,
+        (username, friend_username, friend_username, username)
+    )
+    are_friends = cursor.fetchone()
+    if not are_friends:
+        conn.close()
+        return jsonify({"error": "Vous n'êtes pas amis"}), 403
+
+    # Récupérer l'IP de l'ami
+    cursor.execute("SELECT ipadress FROM users WHERE username = ?", (friend_username,))
+    friend = cursor.fetchone()
+    conn.close()
+    if friend:
+        return jsonify({"ipadress": friend[0]})
+    else:
+        return jsonify({"error": "Utilisateur introuvable"}), 404
+
+
+
+# Lancement de l'application
 if __name__ == '__main__':
-    # Lancer un thread qui s'exécute en parallèle et nettoie toutes les minutes
-    thread = Thread(target=clean_inactive_users_periodically)
-    thread.daemon = True  # Terminer le thread lorsque le programme principal se termine
-    thread.start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=5000)
